@@ -1,7 +1,4 @@
 from flask import Flask, request
-import google.generativeai as genai
-import gspread
-from google.oauth2.service_account import Credentials
 import os
 from datetime import datetime
 import re
@@ -9,13 +6,31 @@ import json
 
 app = Flask(__name__)
 
-# Configure Google AI (Gemini)
-genai.configure(api_key=os.environ.get("GOOGLE_AI_API_KEY"))
-model = genai.GenerativeModel('gemini-pro')
+# Try to import Google AI - with fallback
+try:
+    import google.generativeai as genai
+    genai.configure(api_key=os.environ.get("GOOGLE_AI_API_KEY"))
+    model = genai.GenerativeModel('gemini-pro')
+    GEMINI_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Google AI not available: {e}")
+    GEMINI_AVAILABLE = False
+
+# Try to import Google Sheets - with fallback
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    SHEETS_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Google Sheets not available: {e}")
+    SHEETS_AVAILABLE = False
 
 # Google Sheets setup
 def get_sheets_client():
     """Initialize Google Sheets client"""
+    if not SHEETS_AVAILABLE:
+        return None
+    
     try:
         # Get credentials from environment variable (JSON string)
         creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
@@ -50,22 +65,26 @@ def get_or_create_sheet():
         # Try to open existing spreadsheet
         spreadsheet = client.open(sheet_name)
         worksheet = spreadsheet.sheet1
-    except gspread.SpreadsheetNotFound:
-        # Create new spreadsheet
-        spreadsheet = client.create(sheet_name)
-        worksheet = spreadsheet.sheet1
-        
-        # Set up headers
-        worksheet.update('A1:E1', [['Date', 'Description', 'Amount', 'Category', 'Timestamp']])
-        
-        # Share with your email (optional - update with your email)
-        # spreadsheet.share('your-email@gmail.com', perm_type='user', role='writer')
+    except:
+        try:
+            # Create new spreadsheet
+            spreadsheet = client.create(sheet_name)
+            worksheet = spreadsheet.sheet1
+            
+            # Set up headers
+            worksheet.update('A1:E1', [['Date', 'Description', 'Amount', 'Category', 'Timestamp']])
+        except Exception as e:
+            print(f"Error creating sheet: {e}")
+            return None
     
     return worksheet
 
 # AI categorization using Google Gemini
 def categorize_expense(description):
     """Use Gemini to categorize the expense"""
+    if not GEMINI_AVAILABLE:
+        return "Other"
+    
     try:
         prompt = f"""Categorize this expense into ONE word category: "{description}"
 
@@ -243,20 +262,33 @@ def webhook():
             response_msg = "❌ I couldn't understand that.\n\nTry:\n• 'Lunch 15.50'\n• 'help' for commands"
     
     # Send response back via Twilio
-    from twilio.twiml.messaging_response import MessagingResponse
-    resp = MessagingResponse()
-    resp.message(response_msg)
-    
-    return str(resp)
+    try:
+        from twilio.twiml.messaging_response import MessagingResponse
+        resp = MessagingResponse()
+        resp.message(response_msg)
+        return str(resp)
+    except Exception as e:
+        print(f"Error sending response: {e}")
+        return response_msg
 
 @app.route('/', methods=['GET'])
 def home():
-    return """
+    status_gemini = "✅" if GEMINI_AVAILABLE else "❌"
+    status_sheets = "✅" if SHEETS_AVAILABLE else "❌"
+    
+    return f"""
     <h1>WhatsApp Expense Tracker 🚀</h1>
-    <p>Status: Running</p>
-    <p>✅ Google AI (Gemini)</p>
-    <p>✅ Google Sheets Database</p>
+    <p><strong>Status: Running</strong></p>
+    <p>{status_gemini} Google AI (Gemini)</p>
+    <p>{status_sheets} Google Sheets Database</p>
     <p>✅ Twilio WhatsApp</p>
+    <hr>
+    <p>Environment Variables:</p>
+    <ul>
+        <li>GOOGLE_AI_API_KEY: {'Set ✅' if os.environ.get('GOOGLE_AI_API_KEY') else 'Missing ❌'}</li>
+        <li>GOOGLE_SHEETS_CREDENTIALS: {'Set ✅' if os.environ.get('GOOGLE_SHEETS_CREDENTIALS') else 'Missing ❌'}</li>
+        <li>PORT: {os.environ.get('PORT', '5000')}</li>
+    </ul>
     """
 
 @app.route('/health', methods=['GET'])
@@ -265,5 +297,6 @@ def health():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
+    print(f"Starting server on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
