@@ -9,9 +9,14 @@ app = Flask(__name__)
 # Try to import Google AI - with fallback
 try:
     import google.generativeai as genai
-    genai.configure(api_key=os.environ.get("GOOGLE_AI_API_KEY"))
-    model = genai.GenerativeModel('gemini-pro')
-    GEMINI_AVAILABLE = True
+    api_key = os.environ.get("GOOGLE_AI_API_KEY")
+    if api_key:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        GEMINI_AVAILABLE = True
+    else:
+        GEMINI_AVAILABLE = False
+        print("Warning: GOOGLE_AI_API_KEY not set")
 except Exception as e:
     print(f"Warning: Google AI not available: {e}")
     GEMINI_AVAILABLE = False
