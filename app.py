@@ -12,7 +12,7 @@ try:
     api_key = os.environ.get("GOOGLE_AI_API_KEY")
     if api_key:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-pro')
         GEMINI_AVAILABLE = True
     else:
         GEMINI_AVAILABLE = False
@@ -43,13 +43,19 @@ def get_sheets_client():
             creds_dict = json.loads(creds_json)
             creds = Credentials.from_service_account_info(
                 creds_dict,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
             )
         else:
             # For local development, use credentials file
             creds = Credentials.from_service_account_file(
                 'credentials.json',
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
             )
         
         client = gspread.authorize(creds)
@@ -86,22 +92,64 @@ def get_or_create_sheet():
 
 # AI categorization using Google Gemini
 def categorize_expense(description):
-    """Use Gemini to categorize the expense"""
-    if not GEMINI_AVAILABLE:
-        return "Other"
+    """Use Gemini to categorize the expense, fallback to rule-based"""
     
-    try:
-        prompt = f"""Categorize this expense into ONE word category: "{description}"
+    # If Gemini is available, use it
+    if GEMINI_AVAILABLE:
+        try:
+            prompt = f"""Categorize this expense into ONE word category: "{description}"
 
 Common categories: Food, Transport, Shopping, Entertainment, Bills, Health, Education, Groceries, Other
 
 Respond with ONLY the category name, nothing else."""
-        
-        response = model.generate_content(prompt)
-        category = response.text.strip()
-        return category
-    except Exception as e:
-        print(f"Error categorizing: {e}")
+            
+            response = model.generate_content(prompt)
+            category = response.text.strip()
+            return category
+        except Exception as e:
+            print(f"Error with Gemini, using fallback: {e}")
+    
+    # Fallback: Simple rule-based categorization
+    description_lower = description.lower()
+    
+    # Food keywords
+    food_keywords = ['lunch', 'dinner', 'breakfast', 'coffee', 'restaurant', 'food', 'pizza', 
+                     'burger', 'meal', 'snack', 'groceries', 'grocery', 'cafe', 'starbucks']
+    
+    # Transport keywords
+    transport_keywords = ['uber', 'lyft', 'taxi', 'bus', 'train', 'gas', 'fuel', 'parking', 
+                          'metro', 'subway', 'ride', 'transport', 'car', 'flight', 'plane']
+    
+    # Shopping keywords
+    shopping_keywords = ['amazon', 'shopping', 'store', 'mall', 'clothes', 'clothing', 
+                         'shoes', 'electronics', 'buy', 'purchase']
+    
+    # Entertainment keywords
+    entertainment_keywords = ['movie', 'cinema', 'concert', 'game', 'netflix', 'spotify', 
+                              'entertainment', 'bar', 'club', 'party']
+    
+    # Bills keywords
+    bills_keywords = ['bill', 'rent', 'electric', 'water', 'internet', 'phone', 'utility', 
+                      'insurance', 'subscription']
+    
+    # Health keywords
+    health_keywords = ['doctor', 'hospital', 'medicine', 'pharmacy', 'health', 'gym', 
+                       'fitness', 'medical', 'clinic']
+    
+    # Check each category
+    if any(keyword in description_lower for keyword in food_keywords):
+        return "Food"
+    elif any(keyword in description_lower for keyword in transport_keywords):
+        return "Transport"
+    elif any(keyword in description_lower for keyword in shopping_keywords):
+        return "Shopping"
+    elif any(keyword in description_lower for keyword in entertainment_keywords):
+        return "Entertainment"
+    elif any(keyword in description_lower for keyword in bills_keywords):
+        return "Bills"
+    elif any(keyword in description_lower for keyword in health_keywords):
+        return "Health"
+    else:
         return "Other"
 
 # Parse expense from message
